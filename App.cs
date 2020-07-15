@@ -9,6 +9,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Security;
 using System.Net.Sockets;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
@@ -27,6 +28,7 @@ namespace LeagueTools
         public string AppName { get; private set; } = "LeagueTools";
         public bool AppearOffline { get; private set; } = true;
         public bool RightAlign { get; private set; } = false;
+        public byte[] CertificateBytes { get; private set; }
 
         HashSet<IntPtr> alreadySet = new HashSet<IntPtr>();
 
@@ -37,22 +39,45 @@ namespace LeagueTools
         {
             base.OnStartup(e);
 
-            NotifyIcon = new TaskbarIcon();
-            NotifyIcon.Icon = Icon.ExtractAssociatedIcon(Riot.GetRiotClientPath());
-
-            this.ShutdownMode = ShutdownMode.OnExplicitShutdown;
-            EnsureRiotNotRunning();
-            SetupConfigProxy();
-
-            SetupTrayIcon();
-            DispatcherTimer timer = new DispatcherTimer();
-            timer.Tick += (s, ev) =>
+            //var io = Icon.ExtractAssociatedIcon(Riot.GetRiotClientPath());
+            //using (FileStream fs = new FileStream("riot.ico", FileMode.Create))
+            //    io.Save(fs);
+            try
             {
+                Assembly executingAssembly = Assembly.GetExecutingAssembly();
+                string[] manifestResourceNames = executingAssembly.GetManifestResourceNames();
+                string str = "server.pfx";
+
+                using (var sourceStream = executingAssembly.GetManifestResourceStream(manifestResourceNames.Single(m => m.Contains(str))))
+                using (var memoryStream = new MemoryStream())
+                {
+                    sourceStream.CopyTo(memoryStream);
+                    CertificateBytes = memoryStream.ToArray();
+                }
+
+                NotifyIcon = new TaskbarIcon();
+                NotifyIcon.Icon = Icon.ExtractAssociatedIcon(Riot.GetRiotClientPath());
+
+                this.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+                EnsureRiotNotRunning();
+                SetupConfigProxy();
+
                 SetupTrayIcon();
-                RightAlignGame();
-            };
-            timer.Interval = TimeSpan.FromSeconds(5);
-            timer.Start();
+
+                DispatcherTimer timer = new DispatcherTimer();
+                timer.Tick += (s, ev) =>
+                {
+                    SetupTrayIcon();
+                    RightAlignGame();
+                };
+                timer.Interval = TimeSpan.FromSeconds(5);
+                timer.Start();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.ToString());
+                Shutdown();
+            }
         }
 
         void EnsureRiotNotRunning()
@@ -192,7 +217,6 @@ namespace LeagueTools
             var proxyServer = new ConfigProxy("https://clientconfig.rpg.riotgames.com", port);
             ConfigProxyPort = proxyServer.ConfigPort;
 
-
             int lastChatPort = 0;
             string lastChatHost = "";
 
@@ -210,11 +234,12 @@ namespace LeagueTools
                     // a client is started, and chat will be trying to connect to our TcpListener
                     var incoming = listener.AcceptTcpClient();
                     Console.WriteLine("Accepting chat TCP client");
+                    NotifyIcon.ShowBalloonTip("LeagueTools", "LeagueTools is now intercepting XMPP presence.", BalloonIcon.Info);
 
                     try
                     {
                         var sslIncoming = new SslStream(incoming.GetStream());
-                        var cert = new X509Certificate2(File.ReadAllBytes("server.pfx"));
+                        var cert = new X509Certificate2(CertificateBytes);
                         sslIncoming.AuthenticateAsServer(cert);
 
                         var outgoing = new TcpClient(lastChatHost, lastChatPort);
@@ -228,6 +253,7 @@ namespace LeagueTools
                     {
                         Console.WriteLine("Failed to accept chat TCP client");
                         Console.WriteLine(e.Message);
+                        NotifyIcon.ShowBalloonTip("LeagueTools", "Failed to accept XMPP proxy client: " + e.Message, BalloonIcon.Error);
                         // do nothing.
                     }
                 }

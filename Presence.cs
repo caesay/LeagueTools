@@ -27,7 +27,6 @@ namespace LeagueTools
         private bool _appearOffline;
         private string _lastPresence;
         private bool _connectToMuc = true;
-        private int _id;
         private StringBuilder _builder;
 
         Task incoming = null;
@@ -81,14 +80,18 @@ namespace LeagueTools
                 Thread.Sleep(1000);
                 if (incoming.Status != TaskStatus.Running || outgoing.Status != TaskStatus.Running)
                 {
+                    _builder.AppendLine("(closed)");
+                    _builder.AppendLine();
                     var exception = incoming.Exception ?? outgoing.Exception;
                     if (exception != null)
                     {
-                        _builder.AppendLine("(closed)");
-                        _builder.AppendLine();
                         _builder.AppendLine("An exception was thrown:");
                         _builder.AppendLine(exception.ToString());
                         throw exception;
+                    }
+                    else
+                    {
+                        break;
                     }
                 }
             }
